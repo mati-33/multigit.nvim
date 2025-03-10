@@ -4,6 +4,8 @@ local conf = require("telescope.config").values
 local Job = require("plenary.job")
 local utils = require("multigit.utils")
 local previewers = require("telescope.previewers")
+local actions = require("telescope.actions")
+local action_state = require("telescope.actions.state")
 
 local function get_git_branches(repos)
 	local branches = {}
@@ -50,6 +52,39 @@ local function multi_git_branches()
 					return { "git", "-C", repo, "status" }
 				end,
 			}),
+			attach_mappings = function(prompt_bufnr, map)
+				map("i", "<CR>", function()
+					local selection = action_state.get_selected_entry()
+					actions.close(prompt_bufnr)
+
+					require("telescope.builtin").git_branches({
+						cwd = selection.path,
+						attach_mappings = function(branch_bufnr, branch_map)
+							local function reopen_repo_picker()
+								vim.defer_fn(multi_git_branches, 100)
+							end
+
+							branch_map("i", "<esc>", function()
+								actions.close(branch_bufnr)
+								reopen_repo_picker()
+							end)
+							branch_map("n", "q", function()
+								actions.close(branch_bufnr)
+								reopen_repo_picker()
+							end)
+
+							actions.git_checkout:enhance({
+								post = function()
+									reopen_repo_picker()
+								end,
+							})
+
+							return true
+						end,
+					})
+				end)
+				return true
+			end,
 		})
 		:find()
 end
