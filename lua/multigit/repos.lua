@@ -29,6 +29,10 @@ local function multi_git_branches()
 	local repos = utils.find_git_repos(cwd)
 	local branches = get_git_branches(repos)
 
+	local function reopen_repo_picker()
+		vim.defer_fn(multi_git_branches, 100)
+	end
+
 	pickers
 		.new({}, {
 			prompt_title = "Git Repos",
@@ -60,15 +64,7 @@ local function multi_git_branches()
 					require("telescope.builtin").git_branches({
 						cwd = selection.path,
 						attach_mappings = function(branch_bufnr, branch_map)
-							local function reopen_repo_picker()
-								vim.defer_fn(multi_git_branches, 100)
-							end
-
 							branch_map("i", "<esc>", function()
-								actions.close(branch_bufnr)
-								reopen_repo_picker()
-							end)
-							branch_map("n", "q", function()
 								actions.close(branch_bufnr)
 								reopen_repo_picker()
 							end)
@@ -78,6 +74,22 @@ local function multi_git_branches()
 									reopen_repo_picker()
 								end,
 							})
+
+							return true
+						end,
+					})
+				end)
+				map("i", "<C-s>", function()
+					local selection = action_state.get_selected_entry()
+					actions.close(prompt_bufnr)
+
+					require("telescope.builtin").git_status({
+						cwd = selection.path,
+						attach_mappings = function(branch_bufnr, branch_map)
+							branch_map("i", "<esc>", function()
+								actions.close(branch_bufnr)
+								reopen_repo_picker()
+							end)
 
 							return true
 						end,
