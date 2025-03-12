@@ -1,7 +1,9 @@
 local pickers = require("telescope.pickers")
 local finders = require("telescope.finders")
+local previewers = require("telescope.previewers")
 local conf = require("telescope.config").values
 local Job = require("plenary.job")
+local utils = require("telescope.previewers.utils")
 
 -- Function to recursively find git repos
 local function find_git_repos(root)
@@ -54,11 +56,28 @@ local function git_status_picker()
 						display = entry.name .. " - " .. entry.file,
 						ordinal = entry.name .. " " .. entry.file,
 						filename = entry.path .. "/" .. entry.file:sub(4),
+						path = entry.path,
 					}
 				end,
 			}),
 			sorter = conf.generic_sorter({}),
-			previewer = conf.file_previewer({}), -- TODO: preview with diff
+			previewer = previewers.new_buffer_previewer({
+				define_preview = function(self, entry)
+					local filename = entry.filename
+					local repo = entry.path
+					local cmd = { "git", "-C", repo, "--no-pager", "diff", "--", filename }
+
+					vim.fn.jobstart(cmd, {
+						stdout_buffered = true,
+						on_stdout = function(_, data)
+							if data then
+								vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, data)
+								utils.highlighter(self.state.bufnr, "diff") -- Apply Git diff syntax highlighting
+							end
+						end,
+					})
+				end,
+			}),
 			attach_mappings = function(_, map)
 				map("i", "<CR>", function(prompt_bufnr)
 					local selection = require("telescope.actions.state").get_selected_entry()
