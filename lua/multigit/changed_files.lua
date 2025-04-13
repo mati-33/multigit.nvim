@@ -3,35 +3,19 @@ local finders = require("telescope.finders")
 local previewers = require("telescope.previewers")
 local conf = require("telescope.config").values
 local Job = require("plenary.job")
-local utils = require("telescope.previewers.utils")
+local previewers_utils = require("telescope.previewers.utils")
+local utils = require("multigit.utils")
+local entry_display = require("telescope.pickers.entry_display")
 
--- Function to recursively find git repos
-local function find_git_repos(root)
-	local repos = {}
-	Job:new({
-		command = "find",
-		args = { root, "-type", "d", "-name", ".git" },
-		on_exit = function(j, return_val)
-			if return_val == 0 then
-				for _, path in ipairs(j:result()) do
-					table.insert(repos, string.sub(path, 1, -6))
-				end
-			end
-		end,
-	}):sync()
-	return repos
-end
-
--- Function to collect git status from each repo
 local function get_git_status(repos)
 	local results = {}
-	for _, path in ipairs(repos) do
+	for _, repo in ipairs(repos) do
 		Job:new({
 			command = "git",
-			args = { "-C", path, "status", "--porcelain" },
+			args = { "-C", repo, "status", "--porcelain" },
 			on_exit = function(j)
-				for _, line in ipairs(j:result()) do
-					table.insert(results, { path = path, name = path:match("([^/]+)$"), file = line })
+				for _, file in ipairs(j:result()) do
+					table.insert(results, { repo = repo, file = file:sub(4), status = file:sub(1, 3) })
 				end
 			end,
 		}):sync()
@@ -39,11 +23,27 @@ local function get_git_status(repos)
 	return results
 end
 
--- Telescope picker for changed files in all repos
 local function git_status_picker()
 	local cwd = vim.fn.getcwd()
-	local repos = find_git_repos(cwd)
+	local repos = utils.find_git_repos(cwd)
 	local status_results = get_git_status(repos)
+
+	local displayer = entry_display.create({
+		separator = "  ",
+		items = {
+			{ width = 25 },
+			{ width = 4 },
+			{ remaining = true },
+		},
+	})
+
+	local function make_display(entry)
+		return displayer({
+			entry.value.repo,
+			entry.value.status,
+			entry.value.file,
+		})
+	end
 
 	pickers
 		.new({}, {
@@ -53,26 +53,26 @@ local function git_status_picker()
 				entry_maker = function(entry)
 					return {
 						value = entry,
-						display = entry.name .. " - " .. entry.file,
-						ordinal = entry.name .. " " .. entry.file,
-						filename = entry.path .. "/" .. entry.file:sub(4),
-						path = entry.path,
+						display = make_display,
+						ordinal = entry.repo .. entry.status .. entry.file,
+						repo = entry.repo,
+						file = entry.file,
 					}
 				end,
 			}),
 			sorter = conf.generic_sorter({}),
 			previewer = previewers.new_buffer_previewer({
 				define_preview = function(self, entry)
-					local filename = entry.filename
-					local repo = entry.path
-					local cmd = { "git", "-C", repo, "--no-pager", "diff", "--", filename }
+					local file = entry.file
+					local repo = entry.repo
+					local cmd = { "git", "-C", cwd .. "/" .. repo, "--no-pager", "diff", "--", file }
 
 					vim.fn.jobstart(cmd, {
 						stdout_buffered = true,
 						on_stdout = function(_, data)
 							if data then
 								vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, data)
-								utils.highlighter(self.state.bufnr, "diff") -- Apply Git diff syntax highlighting
+								previewers_utils.highlighter(self.state.bufnr, "diff")
 							end
 						end,
 					})
@@ -82,7 +82,7 @@ local function git_status_picker()
 				map("i", "<CR>", function(prompt_bufnr)
 					local selection = require("telescope.actions.state").get_selected_entry()
 					require("telescope.actions").close(prompt_bufnr)
-					vim.cmd("edit " .. selection.filename)
+					vim.cmd("edit " .. cwd .. "/" .. selection.repo .. "/" .. selection.file)
 				end)
 				return true
 			end,
